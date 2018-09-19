@@ -23,7 +23,7 @@ type Converter struct {
 func ConvertImage(html []byte) (converter Converter, err error) {
 	converter = Converter{HTML: html}
 	converter.ID = converter.GenerateUniqueTempId()
-	fmt.Printf("Converter in ConvertImage: %v\n", string(converter.ID))
+	fmt.Printf("ConverterID in ConvertImage: %v\n", string(converter.ID))
 	err = converter.HtmlToImage()
 	return
 }
@@ -50,7 +50,7 @@ func (c *Converter) HtmlToImage() (err error) {
 	if err := exec.Command(cmd, args...).Run(); err != nil {
 		fmt.Printf("Error executing conversion on command line: %v", err)
 	}
-	fmt.Printf("Image conversion in HTMLToImage complete. Check temp file.\n")
+	fmt.Printf("Image conversion in HTMLToImage complete for %q.\n\n", c.ID)
 	return
 }
 
@@ -62,41 +62,39 @@ func (c *Converter) GenerateUniqueTempId() string {
 	fmt.Printf("Starting Generate ID.\n")
 	rand.Seed(time.Now().Unix())
 	num := strconv.Itoa(rand.Intn(99999999-10000000) + 10000000)
-	fmt.Printf("Unique ID: %s.\n", num)
+	fmt.Printf("Trying unique ID: %s.\n", num)
 
 	c.InFilePattern = TEMP_DIR + "input" + num + ".html"
 	c.OutFilePattern = TEMP_DIR + "output" + num + ".png"
-	fmt.Printf("InFile Pattern: %s.\n", c.InFilePattern)
-	fmt.Printf("OutFile Pattern: %s.\n", c.OutFilePattern)
 
 	//Rerun if number currently in use by either input or output files
 	if _, err := os.Stat(c.InFilePattern); err == nil {
 		fmt.Printf("Found inFile Pattern exists\n")
 		return c.GenerateUniqueTempId()
-		fmt.Printf("Found outFile Pattern exists\n")
 	} else if _, err := os.Stat(c.OutFilePattern); err == nil {
+		fmt.Printf("Found outFile Pattern exists\n")
 		return c.GenerateUniqueTempId()
 	}
+
+	fmt.Printf("InFile Pattern: %s.\n", c.InFilePattern)
+	fmt.Printf("OutFile Pattern: %s.\n", c.OutFilePattern)
 
 	return string(num)
 }
 
 //Remove existing temp files from converter run
-func CleanUp(converter Converter) {
-	inFilePattern := TEMP_DIR + "input" + converter.ID + ".html"
-	outFilePattern := TEMP_DIR + "output" + converter.ID + ".png"
-
-	if _, err := os.Stat(inFilePattern); err == nil {
-		err := os.Remove(inFilePattern)
+func (c *Converter) CleanUp() {
+	if _, err := os.Stat(c.InFilePattern); err == nil {
+		err := os.Remove(c.InFilePattern)
 		if err != nil {
-			fmt.Printf("Error removing temp file: %v", inFilePattern)
+			fmt.Printf("Error removing temp file: %v", c.InFilePattern)
 		}
 	}
 
-	if _, err := os.Stat(outFilePattern); err == nil {
-		err = os.Remove(outFilePattern)
+	if _, err := os.Stat(c.OutFilePattern); err == nil {
+		err = os.Remove(c.OutFilePattern)
 		if err != nil {
-			fmt.Printf("Error removing temp file: %v", outFilePattern)
+			fmt.Printf("Error removing temp file: %v", c.OutFilePattern)
 		}
 	}
 }
