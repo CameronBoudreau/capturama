@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"image/png"
 	"io/ioutil"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -33,7 +35,7 @@ type Validation struct {
 func main() {
 	//Create router for API
 	router := mux.NewRouter().StrictSlash(true)
-	router.HandleFunc("/capture", CaptureHandler)
+	router.HandleFunc("/capture", captureHandler)
 
 	//Listen on port for requests
 	fmt.Println("Listening on port 8080...")
@@ -41,7 +43,7 @@ func main() {
 }
 
 //Handles requests to the capture route
-func CaptureHandler(w http.ResponseWriter, r *http.Request) {
+func captureHandler(w http.ResponseWriter, r *http.Request) {
 	//Get URL from request
 	reqURL, err := url.Parse(r.URL.String())
 	if err != nil {
@@ -79,65 +81,73 @@ func CaptureHandler(w http.ResponseWriter, r *http.Request) {
 		case 3: //400
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Request is too large"))
-		default: //500
+		case 5: //500
 			InternalServerErrorWriter(w)
-			// w.WriteHeader(http.StatusInternalServerError)
-			// w.Write([]byte("Internal server error"))
 		}
 		return
-	}
-
-	if validation.Code == 4 {
-		//205
-		w.WriteHeader(http.StatusResetContent)
 	}
 	fmt.Printf("Length of pageHTML after get function: %v\n\n", len(pageHTML))
 
 	//Convert image
 	converter, err := ConvertImage(pageHTML)
-	defer CleanUp(converter)
-
+	fmt.Printf("Err from convert:%q\n", err)
+	defer converter.CleanUp()
 	if err != nil {
 		//500
 		InternalServerErrorWriter(w)
-		// w.WriteHeader(http.StatusInternalServerError)
-		// w.Write([]byte("Internal server error"))
+		fmt.Printf("Error converting to png: %q", err)
 		return
 	}
 
-	//Write png to http response
+	//Open temp png file from convert
 	file, err := os.Open(converter.OutFilePattern)
 	if err != nil {
 		//500
 		InternalServerErrorWriter(w)
-		// fmt.Printf("Error reading temp png file: %q", converter.OutFilePattern)
-		// w.WriteHeader(http.StatusInternalServerError)
-		// w.Write([]byte("Internal server error"))
+		fmt.Printf("Error reading temp png file: %q", converter.OutFilePattern)
 		return
 	}
 	defer file.Close()
 
+	//Decode
 	img, err := png.Decode(file)
 	if err != nil {
 		//500
 		InternalServerErrorWriter(w)
 		fmt.Printf("Error decoding file to png: %q", converter.OutFilePattern)
-		// w.WriteHeader(http.StatusInternalServerError)
-		// w.Write([]byte("Internal server error"))
 		return
 	}
 
-	w.Header().Set("Content-Type", "image/png")
-	if err := png.Encode(w, img); err != nil {
+	//Place in buffer for writing to responseWriter
+	buffer := new(bytes.Buffer)
+	if err := png.Encode(buffer, img); err != nil {
 		//500
 		InternalServerErrorWriter(w)
-		fmt.Printf("Error decoding file to png: %q", converter.OutFilePattern)
-		// w.WriteHeader(http.StatusInternalServerError)
-		// w.Write([]byte("Internal server error"))
+		fmt.Printf("Error decoding file to png: %q\n", err)
 		return
 	}
 
-	fmt.Printf("Converter.ID in main: %+q", converter.ID)
+	//Set final status code
+	if validation.Code == 4 {
+		//205
+		w.WriteHeader(http.StatusResetContent)
+	} else {
+		//200
+		w.WriteHeader(http.StatusOK)
+	}
+
+	//Set content headers
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Content-Length", strconv.Itoa(len(buffer.Bytes())))
+
+	//Write from buffer
+	if _, err := w.Write(buffer.Bytes()); err != nil {
+		fmt.Println("Unable to write image.")
+	}
+
+	fmt.Printf("Headers at end: %q\n", w.Header())
+	fmt.Printf("Finished job: %q\n\n", converter.ID)
+	return
 }
 
 /*
@@ -193,7 +203,9 @@ func getPageHTML(url, selector string) (html []byte, validation Validation) {
 	}
 
 	validation.Valid = true
-	validation.Code = 0
+	if validation.Code != 4 {
+		validation.Code = 0
+	}
 	fmt.Printf("Validation at return: %v\n", validation)
 	return
 }
