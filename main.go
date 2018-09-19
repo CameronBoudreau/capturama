@@ -2,18 +2,19 @@ package main
 
 import (
 	"fmt"
+	"image/png"
 	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/gorilla/mux"
-	//"conversion/conversion"
 )
 
-const MAX_SIZE = 99999999999
+const MAX_SIZE = 75000
 
 /*
    Codes:
@@ -79,8 +80,9 @@ func CaptureHandler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Request is too large"))
 		default: //500
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Internal server error"))
+			InternalServerErrorWriter(w)
+			// w.WriteHeader(http.StatusInternalServerError)
+			// w.Write([]byte("Internal server error"))
 		}
 		return
 	}
@@ -88,13 +90,58 @@ func CaptureHandler(w http.ResponseWriter, r *http.Request) {
 	if validation.Code == 4 {
 		//205
 		w.WriteHeader(http.StatusResetContent)
-		w.Write([]byte("Dynamic size selector on page not found"))
+	}
+	fmt.Printf("Length of pageHTML after get function: %v\n\n", len(pageHTML))
+
+	//Convert image
+	converter, err := ConvertImage(pageHTML)
+	defer CleanUp(converter)
+
+	if err != nil {
+		//500
+		InternalServerErrorWriter(w)
+		// w.WriteHeader(http.StatusInternalServerError)
+		// w.Write([]byte("Internal server error"))
+		return
 	}
 
-	fmt.Printf("Length of pageHTML after get function: %v\n\n", len(pageHTML))
+	//Write png to http response
+	file, err := os.Open(converter.OutFilePattern)
+	if err != nil {
+		//500
+		InternalServerErrorWriter(w)
+		// fmt.Printf("Error reading temp png file: %q", converter.OutFilePattern)
+		// w.WriteHeader(http.StatusInternalServerError)
+		// w.Write([]byte("Internal server error"))
+		return
+	}
+	defer file.Close()
+
+	img, err := png.Decode(file)
+	if err != nil {
+		//500
+		InternalServerErrorWriter(w)
+		fmt.Printf("Error decoding file to png: %q", converter.OutFilePattern)
+		// w.WriteHeader(http.StatusInternalServerError)
+		// w.Write([]byte("Internal server error"))
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	if err := png.Encode(w, img); err != nil {
+		//500
+		InternalServerErrorWriter(w)
+		fmt.Printf("Error decoding file to png: %q", converter.OutFilePattern)
+		// w.WriteHeader(http.StatusInternalServerError)
+		// w.Write([]byte("Internal server error"))
+		return
+	}
+
+	fmt.Printf("Converter.ID in main: %+q", converter.ID)
 }
 
 /*
+    Function getPageHTML
    Params:
        url - string. URL from which to retrieve html
        selector - String. Element or elements of the html to capture;
@@ -136,20 +183,23 @@ func getPageHTML(url, selector string) (html []byte, validation Validation) {
 	if selector != "" {
 		html = applySelector(html, selector, &validation)
 	}
-	fmt.Printf("Validation after selction: %v\n", validation)
+	fmt.Printf("Validation after selection: %v\n", validation)
 
 	//Size check
 	if len(html) > MAX_SIZE {
+		fmt.Println("HTML selection too large for image conversion after selection.")
 		validation.Code = 3
 		return
 	}
 
 	validation.Valid = true
 	validation.Code = 0
+	fmt.Printf("Validation at return: %v\n", validation)
 	return
 }
 
 /*
+    Function applySelector
    Params:
        html - []byte. HTML byte slice to check for selector elements.
        selector - string. Element or multiple elements to look for.
@@ -171,11 +221,9 @@ func applySelector(html []byte, selector string, validation *Validation) []byte 
 
 		//Look for opening of CSS element
 		idx := strings.Index(string(html), "<"+elem)
-		fmt.Printf("Strings start index for %s: %v\n", elem, idx)
 
 		//Set start to index location
 		if idx != -1 {
-			fmt.Printf("Found at %v.\n First 50 chars from index: %s\n", idx, html[idx:idx+50])
 			start = idx
 		} else {
 			//Selector not found, skipping selection from this element on
@@ -185,11 +233,9 @@ func applySelector(html []byte, selector string, validation *Validation) []byte 
 
 		//Find closing tag to match
 		idx = strings.Index(string(html), "</"+elem)
-		fmt.Printf("Strings end for %s: %v\n", elem, idx)
 
 		//Set start to index location
 		if idx != -1 {
-			fmt.Printf("Found at %v.\n First 50 chars from index: %s\n", idx, html[idx:idx+50])
 			end = idx + 3 + len(elem) //length of </{elem}>
 		} else {
 			//Selector end not found, skipping selection from this element on
@@ -199,4 +245,10 @@ func applySelector(html []byte, selector string, validation *Validation) []byte 
 		html = html[start:end]
 	}
 	return html
+}
+
+//Writes an internal server error to the response writer
+func InternalServerErrorWriter(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusInternalServerError)
+	w.Write([]byte("Internal server error"))
 }
