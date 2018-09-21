@@ -51,6 +51,7 @@ func captureHandler(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Capture page not found."))
 		return
 	}
+	fmt.Printf("Starting run from %v", reqURL)
 	//Get query string parameters from URL
 	query := reqURL.Query()
 	if query.Get("url") == "" {
@@ -80,6 +81,7 @@ func captureHandler(w http.ResponseWriter, r *http.Request) {
 		case 5: //500
 			InternalServerErrorWriter(w)
 		}
+		fmt.Printf("Error with html: %+v\n\n", validation)
 		return
 	}
 
@@ -163,7 +165,7 @@ func captureHandler(w http.ResponseWriter, r *http.Request) {
 	   	}
 	*/
 
-	fmt.Printf("Finished job: %q\n\n", converter.ID)
+	fmt.Printf("Finished job: %q\n\n\n", converter.ID)
 	return
 }
 
